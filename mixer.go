@@ -44,7 +44,6 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"strings"
 	"time"
 
 	"github.com/gorilla/websocket"
