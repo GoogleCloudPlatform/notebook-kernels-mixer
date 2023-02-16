@@ -22,13 +22,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
 
 	"github.com/gorilla/websocket"
-	"google3/third_party/notebookkernelsmixer/backends/backends"
+	"github.com/GoogleCloudPlatform/notebook-kernels-mixer/backends"
 	"github.com/GoogleCloudPlatform/notebook-kernels-mixer/resources"
 	"github.com/GoogleCloudPlatform/notebook-kernels-mixer/util"
 )
@@ -123,17 +124,21 @@ func (k *kernelsRecords) recordKernel(kernelID string, backend *backends.Backend
 
 // combined takes the backend views of the kernels for both local and remote backends, and returns the global view of all kernels.
 func (k *kernelsRecords) combined(localBackend *backends.Backend, remoteBackend *backends.Backend) ([]*resources.Kernel, error) {
+	unified := []*resources.Kernel{}
 	localKernels, err := k.fetchKernels(localBackend)
 	if err != nil {
 		return nil, fmt.Errorf("failure fetching the local kernels: %w", err)
 	}
-	remoteKernels, err := k.fetchKernels(remoteBackend)
-	if err != nil {
-		return nil, fmt.Errorf("failure fetching the remote kernels: %w", err)
-	}
-	unified := []*resources.Kernel{}
 	for _, kernel := range localKernels {
 		unified = append(unified, UnifiedView(kernel, localBackend))
+	}
+	remoteKernels, err := k.fetchKernels(remoteBackend)
+	if err != nil {
+		log.Printf("failure fetching the remote kernels %v\n", err)
+		if localKernels != nil {
+			return unified, nil
+		}
+		return nil, fmt.Errorf("failure fetching the local+remote kernels: %w", err)
 	}
 	for _, kernel := range remoteKernels {
 		unified = append(unified, UnifiedView(kernel, remoteBackend))

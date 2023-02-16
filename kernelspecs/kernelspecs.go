@@ -20,10 +20,11 @@ package kernelspecs
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"strings"
 
-	"google3/third_party/notebookkernelsmixer/backends/backends"
+	"github.com/GoogleCloudPlatform/notebook-kernels-mixer/backends"
 	"github.com/GoogleCloudPlatform/notebook-kernels-mixer/resources"
 	"github.com/GoogleCloudPlatform/notebook-kernels-mixer/util"
 )
@@ -69,8 +70,10 @@ func fetchKernelSpecs(b *backends.Backend) (*resources.KernelSpecs, error) {
 	return &kernelSpecs, nil
 }
 
-// CombinedKernelSpecs takes a backend views of the kernelspecs for both local and remote backends, and returns the combined global view of all kernelspecs.
+// CombinedKernelSpecs takes a backend view of the kernelspecs for both local and remote backends, and returns the combined global view of all kernelspecs.
+// In case there is failure parsing remote kernelspecs return locals if any. Always set a local kernel as default.
 func CombinedKernelSpecs(localBackend *backends.Backend, remoteBackend *backends.Backend) (*resources.KernelSpecs, error) {
+	var defaultKernelSpecs string
 	unifiedView := &resources.KernelSpecs{
 		KernelSpecs: make(map[string]*resources.KernelSpec),
 	}
@@ -78,24 +81,31 @@ func CombinedKernelSpecs(localBackend *backends.Backend, remoteBackend *backends
 	if err != nil {
 		return unifiedView, fmt.Errorf("failure fetching the local kernelspecs: %w", err)
 	}
-	remoteKernelSpecs, err := fetchKernelSpecs(remoteBackend)
-	if err != nil {
-		return unifiedView, fmt.Errorf("failure fetching the remote kernelspecs: %w", err)
-	}
-	if remoteKernelSpecs != nil && remoteKernelSpecs.Default != "" {
-		unifiedView.Default = remoteBackend.UnifiedID(remoteKernelSpecs.Default)
-		for id, spec := range remoteKernelSpecs.KernelSpecs {
-			unifiedID := remoteBackend.UnifiedID(id)
-			unifiedView.KernelSpecs[unifiedID] = UnifiedView(spec, remoteBackend)
-		}
-	}
 	if localKernelSpecs != nil {
 		if localKernelSpecs.Default != "" {
-			unifiedView.Default = localBackend.UnifiedID(localKernelSpecs.Default)
+			defaultKernelSpecs = localBackend.UnifiedID(localKernelSpecs.Default)
+			unifiedView.Default = defaultKernelSpecs
 		}
 		for id, spec := range localKernelSpecs.KernelSpecs {
 			unifiedID := localBackend.UnifiedID(id)
 			unifiedView.KernelSpecs[unifiedID] = UnifiedView(spec, localBackend)
+		}
+	}
+	remoteKernelSpecs, err := fetchKernelSpecs(remoteBackend)
+	if err != nil {
+		log.Printf("failure fetching the remote kernelspecs %v\n", err)
+		// Local Kernels are populated. Return local kernelspecs.
+		if len(unifiedView.KernelSpecs) > 0 {
+			return unifiedView, nil
+		}
+		return unifiedView, fmt.Errorf("failure fetching the local+remote kernelspecs: %w", err)
+	}
+	if remoteKernelSpecs != nil && remoteKernelSpecs.Default != "" {
+		defaultKernelSpecs = remoteBackend.UnifiedID(remoteKernelSpecs.Default)
+		unifiedView.Default = defaultKernelSpecs
+		for id, spec := range remoteKernelSpecs.KernelSpecs {
+			unifiedID := remoteBackend.UnifiedID(id)
+			unifiedView.KernelSpecs[unifiedID] = UnifiedView(spec, remoteBackend)
 		}
 	}
 	return unifiedView, nil
@@ -137,7 +147,9 @@ func Handler(localBackend *backends.Backend, remoteBackend *backends.Backend) ht
 		unifiedKernelSpecs, err := CombinedKernelSpecs(localBackend, remoteBackend)
 		if err != nil {
 			errorMsg := fmt.Sprintf("failure fetching the kernelspecs: %v", err)
+			http.Error(w, errorMsg, util.HTTPStatusCode(err))
 			util.Log(r, fmt.Sprintf("Failed kernelspecs API call: %q", errorMsg))
+			return
 		}
 		respBytes, err := unifiedKernelSpecs.MarshalJSON()
 		if err != nil {

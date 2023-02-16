@@ -19,17 +19,22 @@ package jupytertestutil
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"path"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 	"github.com/GoogleCloudPlatform/notebook-kernels-mixer/resources"
 	"github.com/GoogleCloudPlatform/notebook-kernels-mixer/util"
 )
@@ -51,6 +56,17 @@ type mockJupyter struct {
 
 // NewMockJupyter returns a new HTTP handler that implements a mock Jupyter backend server.
 func NewMockJupyter(basePath string, injectErrors bool, injectLatency time.Duration, kernelspecs *resources.KernelSpecs) http.Handler {
+	if len(basePath) > 0 && basePath != "/" {
+		basePath = path.Join("/", basePath)
+		for _, ks := range kernelspecs.KernelSpecs {
+			relativePath := "/kernelspecs/" + ks.ID
+			for k, v := range ks.Resources {
+				if strings.HasPrefix(v, relativePath) {
+					ks.Resources[k] = path.Join(basePath, v)
+				}
+			}
+		}
+	}
 	return &mockJupyter{
 		basePath:      basePath,
 		kernelspecs:   kernelspecs,
@@ -72,7 +88,8 @@ var DefaultKernelSpecs *resources.KernelSpecs = &resources.KernelSpecs{
 				DisplayName: "Python",
 			},
 			Resources: map[string]string{
-				"example": "example.jpg",
+				"example":  "example.jpg",
+				"logo-svg": "/kernelspecs/python3/logo-svg.svg",
 			},
 		},
 	},
@@ -81,15 +98,18 @@ var DefaultKernelSpecs *resources.KernelSpecs = &resources.KernelSpecs{
 // DefaultMockJupyter is an HTTP handler that implements a mock Jupyter server with one kernelspec.
 var DefaultMockJupyter http.Handler = NewMockJupyter("", false, 0, DefaultKernelSpecs)
 
+// relativePath returns the request's sub-path relative to the mock Jupyter server's base path.
+//
+// The returned result always includes a leading "/".
 func (m *mockJupyter) relativePath(r *http.Request) string {
-	return strings.TrimPrefix(r.URL.Path, m.basePath)
+	return path.Join("/", strings.TrimPrefix(path.Join(r.URL.Path, "/"), path.Join("/", m.basePath)))
 }
 
-func (m *mockJupyter) recordURL(r *http.Request) {
+func (m *mockJupyter) recordURL(urlPath string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.lastCalledPath != r.URL.Path {
-		m.lastCalledPath = r.URL.Path
+	if m.lastCalledPath != urlPath {
+		m.lastCalledPath = urlPath
 		m.firstCalledTime = time.Now()
 	}
 }
@@ -149,11 +169,183 @@ func (m *mockJupyter) deleteKernel(w http.ResponseWriter, r *http.Request, kerne
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// KernelMessage encodes the message used to communicate with a (in this case, mock) Jupyter kernel.
+//
+// Communication with a Jupyter kernel follows the protocol defined here:
+//
+//	https://jupyter-client.readthedocs.io/en/latest/messaging.html
+//
+// For kernel gateways, this protocol is layered on top of a websocket connection to the endpoint
+// `<BASE_PATH>/api/kernels/<KERNEL_UUID>/channels?session_id=...`, with the messages going back
+// and forth both being JSON objects as described below.
+type KernelMessage struct {
+	// Buffers is used for extensions. We just leave it empty.
+	Buffers []any `json:"buffers"`
+
+	// Channel identifies which of the kernel's communication channels is being used.
+	//
+	// We hardcode this to "shell"
+	Channel string `json:"channel"`
+
+	// Content is the contents of the message and its values depend on the message type.
+	Content map[string]any `json:"content"`
+
+	// Header is the header for this message.
+	Header *KernelMessageHeader `json:"header"`
+
+	// Metadata is used for extensions. We leave it empty.
+	Metadata map[string]any `json:"metadata"`
+
+	// MsgID duplicates the "msg_id" field inside the header.
+	//
+	// It appears to be optional, so we always set it but never read it.
+	MsgID string `json:"msg_id"`
+
+	// MsgType duplicates the "msg_type" field inside the header.
+	//
+	// It appears to be optional, so we always set it but never read it.
+	MsgType string `json:"msg_type"`
+
+	// ParentHeader is set for reply messages, and is the header value of
+	// the message being replied to.
+	ParentHeadder *KernelMessageHeader `json:"parent_header"`
+}
+
+// KernelMessageHeader defines the encoding of the header field for kernel messages.
+type KernelMessageHeader struct {
+	// Date is a string encoding the date of the message in ISO 8601 format.
+	Date string `json:"date"`
+
+	// MsgID is a unique ID for the message.
+	MsgID string `json:"msg_id"`
+
+	// MsgType is a string specifying how the message's `content` field should be interpreted.
+	// for the purposes of testing, we only use the `execute_request` and `execute_reply` types.
+	MsgType string `json:"msg_type"`
+
+	// Session is a unique ID for the running process (i.e. the kernel).
+	Session string `json:"session"`
+
+	// Username is the username of the user. We just hardcode this to "user".
+	Username string `json:"username"`
+
+	// Version is the version string of the Jupyter messaging protocol. We hardcode it to "5.4".
+	Version string `json:"version"`
+}
+
+// connectToKernel implements the kernel message channel.
+//
+// For the purposes of testing, we only use `execute_request` and `execute_reply` messages.
+//
+// We will ignore all of the fields from "execute_request" messages, and simply write out
+// corresponding "execute_reply" messages that have the following fields in their "content"
+// dictionary:
+//   - execution_count: (an incrementing integer)
+//   - payload: (an empty array)
+//   - status: "ok"
+//
+// The parent_header for "execute_reply" messages will be the contents of the "header" dictionary
+// from the corresponding "execute_request" message.
+func (m *mockJupyter) connectToKernel(w http.ResponseWriter, r *http.Request, kernelID string) {
+	log.Printf("Handling a websocket upgrade request: %+v", r)
+	m.mu.Lock()
+	_, ok := m.kernels[kernelID]
+	m.mu.Unlock()
+	if !ok {
+		log.Printf("Kernel not found: %q", kernelID)
+		http.NotFound(w, r)
+		return
+	}
+	ctx, cancel := context.WithCancel(r.Context())
+	defer cancel()
+	upgrader := websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		Subprotocols:    []string{},
+	}
+	conn, err := upgrader.Upgrade(w, r, http.Header{})
+	if err != nil {
+		log.Printf("Failure in the websocket upgrade call: %v", err)
+		return
+	}
+	baseCloseHandler := conn.CloseHandler()
+	conn.SetCloseHandler(func(code int, test string) error {
+		cancel()
+		return baseCloseHandler(code, test)
+	})
+	defer func() {
+		conn.WriteControl(websocket.CloseMessage, []byte{}, time.Now())
+		conn.Close()
+	}()
+	clientMsgs := make(chan *KernelMessage, 1)
+	go func() {
+		defer func() {
+			close(clientMsgs)
+			cancel()
+		}()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				_, msgBytes, err := conn.ReadMessage()
+				if err != nil {
+					return
+				}
+				var kernelMessage KernelMessage
+				if err := json.Unmarshal(msgBytes, &kernelMessage); err != nil {
+					return
+				}
+				clientMsgs <- &kernelMessage
+			}
+		}
+	}()
+	for {
+		var executionCount int
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(5 * time.Second):
+			if err := conn.WriteControl(websocket.PingMessage, []byte("ping"), time.Now()); err != nil {
+				return
+			}
+		case msg := <-clientMsgs:
+			executionCount++
+			resp := &KernelMessage{
+				Header: &KernelMessageHeader{
+					Date:     time.Now().Format(time.RFC3339),
+					MsgID:    uuid.NewString(),
+					MsgType:  "execute_reply",
+					Session:  msg.Header.Session,
+					Username: "user",
+					Version:  "5.4",
+				},
+				Channel: msg.Channel,
+				Content: map[string]any{
+					"execution_count": executionCount,
+					"payload":         []any{},
+					"status":          "ok",
+				},
+				ParentHeadder: msg.Header,
+			}
+			respBytes, err := json.Marshal(resp)
+			if err != nil {
+				return
+			}
+			conn.WriteMessage(websocket.TextMessage, respBytes)
+		}
+	}
+}
+
 func (m *mockJupyter) handleKernelsRequest(w http.ResponseWriter, r *http.Request, body []byte) {
 	if strings.HasPrefix(m.relativePath(r), "/api/kernels/") {
-		kernelID := strings.TrimPrefix(m.relativePath(r), "/api/kernels/")
+		kernelID := strings.Split(strings.TrimPrefix(m.relativePath(r), "/api/kernels/"), "/")[0]
 		switch method := r.Method; method {
 		case http.MethodGet:
+			if websocket.IsWebSocketUpgrade(r) {
+				m.connectToKernel(w, r, kernelID)
+				return
+			}
 			m.getKernel(w, r, kernelID)
 			return
 		case http.MethodDelete:
@@ -368,8 +560,13 @@ func (m *mockJupyter) shouldFailRequest(r *http.Request) bool {
 }
 
 func (m *mockJupyter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	defer m.recordURL(r)
+	log.Printf("Request to the mock Jupyter server: %+v", r)
+	if !strings.HasPrefix(path.Join("/", r.URL.Path), path.Join("/", m.basePath)) {
+		http.NotFound(w, r)
+		return
+	}
 
+	defer m.recordURL(r.URL.Path)
 	if r.Method != http.MethodGet && r.Method != http.MethodHead {
 		// Inject artificial latency on mutation requests to simulate real-world performance.
 		time.Sleep(m.injectLatency)
@@ -384,7 +581,9 @@ func (m *mockJupyter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failure reading request body: %v", err), http.StatusInternalServerError)
 	}
-	switch collection := strings.Split(strings.TrimPrefix(m.relativePath(r), "/api/"), "/")[0]; collection {
+	collection := strings.Split(strings.TrimPrefix(m.relativePath(r), "/api/"), "/")[0]
+	log.Printf("Request to the mock Jupyter server for the %q collection...", collection)
+	switch collection {
 	case "kernelspecs":
 		m.handleKernelspecsRequest(w, r, body)
 	case "kernels":
@@ -494,6 +693,64 @@ func Delete(server *httptest.Server, path string) error {
 	}
 	if resp.StatusCode != http.StatusNoContent {
 		return fmt.Errorf("unexpected status code for a delete: %w", util.HTTPError(resp.StatusCode))
+	}
+	return nil
+}
+
+// ExerciseKernelWebsockets sends one end-to-end kernel message to the given URL.
+func ExerciseKernelWebsockets(serverURL, jupyterBasePath, kernelID string, requestHeader http.Header) error {
+	wsURL, err := url.Parse(serverURL)
+	if err != nil {
+		return fmt.Errorf("failure parsing the server URL: %v", err)
+	}
+	wsURL.Scheme = "ws"
+	wsURL.Path = path.Join(wsURL.Path, jupyterBasePath, "/api/kernels/", kernelID, "/channels")
+	q := wsURL.Query()
+	q.Set("session_id", kernelID)
+	wsURL.RawQuery = q.Encode()
+	log.Printf("Creating a websocket connection to %q", wsURL.String())
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL.String(), requestHeader)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	kernelMsgHeader := &KernelMessageHeader{
+		Date:     time.Now().Format(time.RFC3339),
+		MsgID:    uuid.NewString(),
+		MsgType:  "execute_request",
+		Session:  kernelID,
+		Username: "user",
+		Version:  "5.4",
+	}
+	kernelMsg := &KernelMessage{
+		Header:  kernelMsgHeader,
+		Channel: "shell",
+		MsgID:   kernelMsgHeader.MsgID,
+		MsgType: kernelMsgHeader.MsgType,
+		Content: map[string]any{
+			"code": "!true",
+		},
+	}
+	msgBytes, err := json.Marshal(kernelMsg)
+	if err != nil {
+		return err
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, msgBytes); err != nil {
+		return err
+	}
+	_, respBytes, err := conn.ReadMessage()
+	if err != nil {
+		return err
+	}
+	var resp KernelMessage
+	if err := json.Unmarshal(respBytes, &resp); err != nil {
+		return err
+	}
+	if got, want := resp.ParentHeadder.MsgID, kernelMsgHeader.MsgID; got != want {
+		return fmt.Errorf("unexpected message parent ID: got %q, want %q", got, want)
+	}
+	if got, want := resp.Content["status"], "ok"; got != want {
+		return fmt.Errorf("unexpected message status: got %q, want %q", got, want)
 	}
 	return nil
 }

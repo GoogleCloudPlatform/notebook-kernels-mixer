@@ -16,6 +16,7 @@ limitations under the License.
 package jupytertestutil
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -59,6 +60,9 @@ func TestRoundtrip(t *testing.T) {
 		t.Errorf("Failure reading the kernels collection: %v", err)
 	} else if got, want := len(kc1), 1; got != want {
 		t.Errorf("Unexpected number of kernels: got %d, want %d", got, want)
+	}
+	if err := ExerciseKernelWebsockets(server.URL, "", k2.ID, http.Header{}); err != nil {
+		t.Errorf("Failure exercising the kernel: %v", err)
 	}
 
 	var kc2 []resources.Kernel

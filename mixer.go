@@ -49,10 +49,10 @@ import (
 
 	"github.com/gorilla/websocket"
 	"golang.org/x/oauth2"
-	"google3/third_party/notebookkernelsmixer/backends/backends"
-	"google3/third_party/notebookkernelsmixer/kernels/kernels"
-	"google3/third_party/notebookkernelsmixer/kernelspecs/kernelspecs"
-	"google3/third_party/notebookkernelsmixer/sessions/sessions"
+	"github.com/GoogleCloudPlatform/notebook-kernels-mixer/backends"
+	"github.com/GoogleCloudPlatform/notebook-kernels-mixer/kernels"
+	"github.com/GoogleCloudPlatform/notebook-kernels-mixer/kernelspecs"
+	"github.com/GoogleCloudPlatform/notebook-kernels-mixer/sessions"
 	"github.com/GoogleCloudPlatform/notebook-kernels-mixer/util"
 )
 

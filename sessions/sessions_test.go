@@ -34,8 +34,8 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	"github.com/google/uuid"
-	"google3/third_party/notebookkernelsmixer/backends/backends"
-	"google3/third_party/notebookkernelsmixer/jupytertestutil/jupytertestutil"
+	"github.com/GoogleCloudPlatform/notebook-kernels-mixer/backends"
+	"github.com/GoogleCloudPlatform/notebook-kernels-mixer/jupytertestutil"
 	"github.com/GoogleCloudPlatform/notebook-kernels-mixer/resources"
 	"google3/webutil/http/go/httpheader"
 )

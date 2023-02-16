@@ -27,8 +27,8 @@ import (
 	"sync"
 	"time"
 
-	"google3/third_party/notebookkernelsmixer/backends/backends"
-	"google3/third_party/notebookkernelsmixer/kernels/kernels"
+	"github.com/GoogleCloudPlatform/notebook-kernels-mixer/backends"
+	"github.com/GoogleCloudPlatform/notebook-kernels-mixer/kernels"
 	"github.com/GoogleCloudPlatform/notebook-kernels-mixer/resources"
 	"github.com/GoogleCloudPlatform/notebook-kernels-mixer/util"
 )
