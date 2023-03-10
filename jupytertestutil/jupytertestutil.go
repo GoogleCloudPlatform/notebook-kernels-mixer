@@ -115,6 +115,19 @@ func (m *mockJupyter) recordURL(urlPath string) {
 }
 
 func (m *mockJupyter) handleKernelspecsRequest(w http.ResponseWriter, r *http.Request, body []byte) {
+	if strings.HasPrefix(m.relativePath(r), "/kernelspecs") {
+		// Handle a resources download request
+		log.Printf("Service kernelspecs resources request %+v", r)
+		if strings.HasSuffix(r.URL.Path, "logo-svg.svg") {
+			w.Header().Set("Content-Type", "image/svg+xml")
+			w.WriteHeader(http.StatusOK)
+			w.Write([]byte{})
+			return
+		}
+		// Not a known resource
+		http.NotFound(w, r)
+		return
+	}
 	if m.relativePath(r) != "/api/kernelspecs" {
 		http.Error(w, fmt.Sprintf("Path not supported: %q", m.relativePath(r)), http.StatusBadRequest)
 		return
@@ -561,6 +574,9 @@ func (m *mockJupyter) shouldFailRequest(r *http.Request) bool {
 
 func (m *mockJupyter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Printf("Request to the mock Jupyter server: %+v", r)
+	defer func() {
+		log.Printf("Response headers for request to %q: %+v", r.URL.Path, w.Header())
+	}()
 	if !strings.HasPrefix(path.Join("/", r.URL.Path), path.Join("/", m.basePath)) {
 		http.NotFound(w, r)
 		return
@@ -581,7 +597,7 @@ func (m *mockJupyter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failure reading request body: %v", err), http.StatusInternalServerError)
 	}
-	collection := strings.Split(strings.TrimPrefix(m.relativePath(r), "/api/"), "/")[0]
+	collection := strings.Split(strings.TrimPrefix(strings.TrimPrefix(m.relativePath(r), "/api/"), "/"), "/")[0]
 	log.Printf("Request to the mock Jupyter server for the %q collection...", collection)
 	switch collection {
 	case "kernelspecs":
