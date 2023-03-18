@@ -62,6 +62,47 @@ on (by default the value of the `ServerApp.port` configuration option) in order
 to use Jupyter while being able to easily switch any notebooks to running
 remotely in GCP.
 
+# How to run a local container for Kernel Mixer
+
+```
+# Change the following values.
+PROJECT=""
+REGION="us-central1"
+MIXER_CONTAINER_NAME=notebook-kernels-mixer
+MIXER_PORT=9991
+JUPYTER_BACKEND_PORT=9992
+JUPYTER_TOKEN=""
+CONTAINER_URL=gcr.io/${PROJECT?}/${MIXER_CONTAINER_NAME?}:local
+
+# Build your container locally.
+
+docker build -t ${CONTAINER_URL} .
+
+function start_mixer_client() {
+  docker stop ${MIXER_CONTAINER_NAME}
+  docker rm ${MIXER_CONTAINER_NAME}
+
+  echo "Starting Mixer client"
+
+  docker run -d \
+    --env "MIXER_PORT=${MIXER_PORT}" \
+    --env "PROJECT=${PROJECT}" \
+    --env "REGION=${REGION}" \
+    --env "JUPYTER_BACKEND_PORT=${JUPYTER_BACKEND_PORT}" \
+    --env "JUPYTER_TOKEN=${JUPYTER_TOKEN}" \
+    --net=host \
+    --restart always \
+    -v $HOME/.config/gcloud:/root/.config/gcloud \
+    --name "${MIXER_CONTAINER_NAME}" \
+    "${CONTAINER_URL}"
+  RETVAL=$?
+  if [[ "$RETVAL" -gt 0 ]]; then
+    echo "Could not start Docker Mixer Agent"
+  fi
+  echo "Docker Mixer client started"
+}
+```
+
 # Limitations
 
 * This proxy does not enforce any authentication or access controls beyond the
