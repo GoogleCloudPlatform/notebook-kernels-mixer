@@ -150,9 +150,12 @@ func (m *mockJupyter) insertKernel(k *resources.Kernel) (*resources.Kernel, erro
 	if _, ok := m.kernelspecs.KernelSpecs[k.SpecID]; !ok {
 		return nil, fmt.Errorf("unknown kernelspec %q: %w", k.SpecID, util.HTTPError(http.StatusBadRequest))
 	}
-	k.ID = uuid.New().String()
-	m.kernels[k.ID] = k
-	return k, nil
+	inserted := *k
+	inserted.ID = uuid.New().String()
+	inserted.ExecutionState = "starting"
+	inserted.LastActivity = time.Now().Format(time.RFC3339)
+	m.kernels[inserted.ID] = &inserted
+	return &inserted, nil
 }
 
 func (m *mockJupyter) getKernel(w http.ResponseWriter, r *http.Request, kernelID string) {
@@ -323,6 +326,10 @@ func (m *mockJupyter) connectToKernel(w http.ResponseWriter, r *http.Request, ke
 				return
 			}
 		case msg := <-clientMsgs:
+			if msg == nil {
+				// The channel has been closed
+				return
+			}
 			executionCount++
 			resp := &KernelMessage{
 				Header: &KernelMessageHeader{

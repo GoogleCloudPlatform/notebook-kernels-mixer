@@ -251,7 +251,7 @@ func TestCreateUpdateDelete(t *testing.T) {
 
 	// Test getting the created session.
 	ignorePathMapDiff := cmpopts.IgnoreMapEntries(func(k, v string) bool { return k == "path" })
-	if diff := diffSessions(saved, initialSession, cmpopts.IgnoreFields(resources.Session{}, "ID"), cmpopts.IgnoreFields(resources.Kernel{}, "ID"), ignorePathMapDiff); diff != "" {
+	if diff := diffSessions(saved, initialSession, cmpopts.IgnoreFields(resources.Session{}, "ID"), cmpopts.IgnoreFields(resources.Kernel{}, "ID", "LastActivity", "ExecutionState"), ignorePathMapDiff); diff != "" {
 		t.Errorf("unexpected diff for constructed session: %+v, %s", saved, diff)
 	} else if got, err := GetSession(sessionsHandler, saved.ID); err != nil {
 		t.Errorf("failured getting a saved session %q: %v", saved.ID, err)
