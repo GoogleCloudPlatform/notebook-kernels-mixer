@@ -182,13 +182,13 @@ func diffSessions(got, want *resources.Session, opts ...cmp.Option) string {
 }
 
 func TestCreateUpdateDelete(t *testing.T) {
-	localMockJupyter := httptest.NewServer(jupytertestutil.NewMockJupyter("", false, 0, jupytertestutil.DefaultKernelSpecs))
+	localMockJupyter := httptest.NewServer(jupytertestutil.NewMockJupyter("", false, 0, 0, jupytertestutil.DefaultKernelSpecs))
 	defer localMockJupyter.Close()
 	localURL, err := url.Parse(localMockJupyter.URL)
 	if err != nil {
 		t.Fatalf("failure parsing the URL of the mock local jupyter: %v", err)
 	}
-	remoteMockJupyter := httptest.NewServer(jupytertestutil.NewMockJupyter("", false, 0, jupytertestutil.DefaultKernelSpecs))
+	remoteMockJupyter := httptest.NewServer(jupytertestutil.NewMockJupyter("", false, 0, 0, jupytertestutil.DefaultKernelSpecs))
 	defer remoteMockJupyter.Close()
 	remoteURL, err := url.Parse(remoteMockJupyter.URL)
 	if err != nil {

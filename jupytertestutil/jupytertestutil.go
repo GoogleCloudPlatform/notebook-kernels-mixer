@@ -44,6 +44,7 @@ type mockJupyter struct {
 	kernelspecs   *resources.KernelSpecs
 	injectErrors  bool
 	injectLatency time.Duration
+	availableTime time.Time
 
 	// mu protects the fields below it.
 	mu sync.Mutex
@@ -55,7 +56,7 @@ type mockJupyter struct {
 }
 
 // NewMockJupyter returns a new HTTP handler that implements a mock Jupyter backend server.
-func NewMockJupyter(basePath string, injectErrors bool, injectLatency time.Duration, kernelspecs *resources.KernelSpecs) http.Handler {
+func NewMockJupyter(basePath string, injectErrors bool, injectLatency, injectStartupLatency time.Duration, kernelspecs *resources.KernelSpecs) http.Handler {
 	if len(basePath) > 0 && basePath != "/" {
 		basePath = path.Join("/", basePath)
 		for _, ks := range kernelspecs.KernelSpecs {
@@ -72,6 +73,7 @@ func NewMockJupyter(basePath string, injectErrors bool, injectLatency time.Durat
 		kernelspecs:   kernelspecs,
 		injectErrors:  injectErrors,
 		injectLatency: injectLatency,
+		availableTime: time.Now().Add(injectStartupLatency),
 		kernels:       make(map[string]*resources.Kernel),
 		sessions:      make(map[string]*resources.Session),
 	}
@@ -96,7 +98,7 @@ var DefaultKernelSpecs *resources.KernelSpecs = &resources.KernelSpecs{
 }
 
 // DefaultMockJupyter is an HTTP handler that implements a mock Jupyter server with one kernelspec.
-var DefaultMockJupyter http.Handler = NewMockJupyter("", false, 0, DefaultKernelSpecs)
+var DefaultMockJupyter http.Handler = NewMockJupyter("", false, 0, 0, DefaultKernelSpecs)
 
 // relativePath returns the request's sub-path relative to the mock Jupyter server's base path.
 //
@@ -584,6 +586,10 @@ func (m *mockJupyter) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		log.Printf("Response headers for request to %q: %+v", r.URL.Path, w.Header())
 	}()
+	if m.availableTime.After(time.Now()) {
+		http.Error(w, http.StatusText(http.StatusTooEarly), http.StatusTooEarly)
+		return
+	}
 	if !strings.HasPrefix(path.Join("/", r.URL.Path), path.Join("/", m.basePath)) {
 		http.NotFound(w, r)
 		return
