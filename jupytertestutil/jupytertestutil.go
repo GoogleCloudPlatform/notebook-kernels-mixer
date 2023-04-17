@@ -59,11 +59,13 @@ type mockJupyter struct {
 func NewMockJupyter(basePath string, injectErrors bool, injectLatency, injectStartupLatency time.Duration, kernelspecs *resources.KernelSpecs) http.Handler {
 	if len(basePath) > 0 && basePath != "/" {
 		basePath = path.Join("/", basePath)
-		for _, ks := range kernelspecs.KernelSpecs {
-			relativePath := "/kernelspecs/" + ks.ID
-			for k, v := range ks.Resources {
-				if strings.HasPrefix(v, relativePath) {
-					ks.Resources[k] = path.Join(basePath, v)
+		if kernelspecs != nil {
+			for _, ks := range kernelspecs.KernelSpecs {
+				relativePath := "/kernelspecs/" + ks.ID
+				for k, v := range ks.Resources {
+					if strings.HasPrefix(v, relativePath) {
+						ks.Resources[k] = path.Join(basePath, v)
+					}
 				}
 			}
 		}
