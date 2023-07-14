@@ -103,6 +103,9 @@ func (err HTTPError) StatusCode() int {
 //
 // If the supplied error does not have a known status code we fallback to 500.
 func HTTPStatusCode(err error) int {
+	if err == nil {
+		return http.StatusOK
+	}
 	var he HTTPError
 	if errors.As(err, &he) {
 		return he.StatusCode()
