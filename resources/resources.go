@@ -215,7 +215,10 @@ type Kernel struct {
 	// The `env` field is not part of the documented API, but is set by the notebook
 	// server when calling into gateway servers. See here:
 	//    https://github.com/jupyter/notebook/blob/2cfff07a39fa486a3f05c26b400fa26e1802a053/notebook/gateway/managers.py#L408
-	Env       map[string]any `json:"env,omitempty"`
+	Env map[string]any `json:"env,omitempty"`
+	// This `metadata` field is not part of the Jupyter API. It is added as an extension for reporting
+	// additional metadata.
+	Metadata  map[string]any `json:"metadata,omitempty"`
 	rawFields map[string]any
 }
 
@@ -276,6 +279,13 @@ func (k *Kernel) UnmarshalJSON(b []byte) error {
 		}
 		k.Env = envMap
 	}
+	if metadataVal, ok := rawFields["metadata"]; ok {
+		metadataMap, ok := metadataVal.(map[string]any)
+		if !ok {
+			return fmt.Errorf("invalid value for the field 'metadata': %+v: %w", metadataVal, util.HTTPError(http.StatusBadRequest))
+		}
+		k.Metadata = metadataMap
+	}
 	k.rawFields = rawFields
 	return nil
 }
@@ -302,6 +312,9 @@ func (k Kernel) MarshalJSON() ([]byte, error) {
 	}
 	if len(k.Env) > 0 {
 		rawFields["env"] = k.Env
+	}
+	if len(k.Metadata) > 0 {
+		rawFields["metadata"] = k.Metadata
 	}
 	return json.Marshal(rawFields)
 }
