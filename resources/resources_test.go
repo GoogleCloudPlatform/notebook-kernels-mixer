@@ -182,6 +182,25 @@ func TestUnmarshalAndMarshalRoundtrip(t *testing.T) {
 			},
 		},
 		{
+			Description: "Simple Kernel with metadata",
+			Source:      "{\"id\": \"ID\", \"name\": \"specID\", \"last_activity\": \"some time ago\", \"connections\": 5, \"execution_state\": \"being tested\", \"env\": {\"env-var\": 1}, \"metadata\": {\"labal\": \"value\"}, \"foo\": \"bar\", \"baz\": \"bat\"}",
+			Got:         &Kernel{},
+			Want: &Kernel{
+				ID:             "ID",
+				SpecID:         "specID",
+				LastActivity:   "some time ago",
+				Connections:    5,
+				ExecutionState: "being tested",
+				// N.B. `float64(1)` instead of just `1`, because JSON numbers are floating point.
+				Env:      map[string]any{"env-var": float64(1)},
+				Metadata: map[string]any{"labal": "value"},
+				rawFields: map[string]any{
+					"foo": "bar",
+					"baz": "bat",
+				},
+			},
+		},
+		{
 			Description: "Session with kernel with raw fields",
 			Source:      "{\"id\": \"sessionID\", \"name\": \"sessionName\", \"path\": \"/path/\", \"type\": \"sessionType\", \"kernel\": {\"id\": \"kernelID\", \"name\": \"specID\", \"last_activity\": \"some time ago\", \"connections\": 5, \"execution_state\": \"being tested\", \"foo\": \"bar\", \"baz\": \"bat\"}, \"notebook\": {\"a\": \"b\"}}",
 			Got:         &Session{},
@@ -276,6 +295,10 @@ func TestUnmarshalAndMarshalRoundtrip(t *testing.T) {
 			t.Errorf("Unexpected diff when unmarshalling the source for %q:\n\t %v", testCase.Description, diff)
 		} else if output, err := json.Marshal(testCase.Got); err != nil {
 			t.Errorf("Failure marshalling the unmarshalled resource for %q: %v", testCase.Description, err)
+		} else if err := json.Unmarshal(output, testCase.Got); err != nil {
+			t.Errorf("Failure unmarshalling the marshalled resource for %q: %v", testCase.Description, err)
+		} else if diff := cmp.Diff(testCase.Got, testCase.Want, cmpopts.EquateEmpty(), cmpopts.IgnoreUnexported(KernelSpecs{}, KernelSpec{}, Kernel{}, Session{}, Terminal{})); len(diff) > 0 {
+			t.Errorf("Unexpected diff when unmarshalling the marshalled resource for %q:\n\t %v", testCase.Description, diff)
 		} else {
 			sourceRawFields := make(map[string]any)
 			outputRawFields := make(map[string]any)
