@@ -25,16 +25,18 @@ import (
 
 func TestUnmarshalAndMarshalRoundtrip(t *testing.T) {
 	testCases := []struct {
-		Description string
-		Source      string
-		Got         any
-		Want        any
+		Description    string
+		Source         string
+		Got            any
+		Want           any
+		WantMarshalled string
 	}{
 		{
-			Description: "Empty KernelSpecs",
-			Source:      "{}",
-			Got:         &KernelSpecs{},
-			Want:        &KernelSpecs{},
+			Description:    "Empty KernelSpecs",
+			Source:         "{}",
+			Got:            &KernelSpecs{},
+			Want:           &KernelSpecs{},
+			WantMarshalled: "{\"kernelspecs\":{}}",
 		},
 		{
 			Description: "Empty KernelSpecs with raw fields",
@@ -46,6 +48,7 @@ func TestUnmarshalAndMarshalRoundtrip(t *testing.T) {
 					"baz": "bat",
 				},
 			},
+			WantMarshalled: "{\"baz\":\"bat\",\"foo\":\"bar\",\"kernelspecs\":{}}",
 		},
 		{
 			Description: "Simple KernelSpecs",
@@ -295,20 +298,27 @@ func TestUnmarshalAndMarshalRoundtrip(t *testing.T) {
 			t.Errorf("Unexpected diff when unmarshalling the source for %q:\n\t %v", testCase.Description, diff)
 		} else if output, err := json.Marshal(testCase.Got); err != nil {
 			t.Errorf("Failure marshalling the unmarshalled resource for %q: %v", testCase.Description, err)
-		} else if err := json.Unmarshal(output, testCase.Got); err != nil {
-			t.Errorf("Failure unmarshalling the marshalled resource for %q: %v", testCase.Description, err)
-		} else if diff := cmp.Diff(testCase.Got, testCase.Want, cmpopts.EquateEmpty(), cmpopts.IgnoreUnexported(KernelSpecs{}, KernelSpec{}, Kernel{}, Session{}, Terminal{})); len(diff) > 0 {
-			t.Errorf("Unexpected diff when unmarshalling the marshalled resource for %q:\n\t %v", testCase.Description, diff)
 		} else {
-			sourceRawFields := make(map[string]any)
-			outputRawFields := make(map[string]any)
-			if err := json.Unmarshal([]byte(testCase.Source), &sourceRawFields); err != nil {
-				t.Errorf("Failure unmarshalling the resource for %q as raw fields: %v", testCase.Description, err)
-			} else if err := json.Unmarshal(output, &outputRawFields); err != nil {
-				t.Errorf("Failure unmarshalling the result for %q as raw fields: %v", testCase.Description, err)
-			} else if rawFieldsDiff := cmp.Diff(outputRawFields, sourceRawFields, cmpopts.EquateEmpty(), cmpopts.SortMaps(func(a, b string) bool { return a < b })); len(rawFieldsDiff) > 0 {
-				t.Logf("Output raw: %v", string(output))
-				t.Errorf("Unexpected raw fields diff for the marshalled value for %q:\n\t %v", testCase.Description, rawFieldsDiff)
+			if len(testCase.WantMarshalled) > 0 {
+				if diff := cmp.Diff(string(output), testCase.WantMarshalled); len(diff) > 0 {
+					t.Errorf("Unexpected diff when marshalling the unmarshalled resource for %q:\n\t %v", testCase.Description, diff)
+				}
+			}
+			if err := json.Unmarshal(output, testCase.Got); err != nil {
+				t.Errorf("Failure unmarshalling the marshalled resource for %q: %v", testCase.Description, err)
+			} else if diff := cmp.Diff(testCase.Got, testCase.Want, cmpopts.EquateEmpty(), cmpopts.IgnoreUnexported(KernelSpecs{}, KernelSpec{}, Kernel{}, Session{}, Terminal{})); len(diff) > 0 {
+				t.Errorf("Unexpected diff when unmarshalling the marshalled resource for %q:\n\t %v", testCase.Description, diff)
+			} else if len(testCase.WantMarshalled) == 0 {
+				sourceRawFields := make(map[string]any)
+				outputRawFields := make(map[string]any)
+				if err := json.Unmarshal([]byte(testCase.Source), &sourceRawFields); err != nil {
+					t.Errorf("Failure unmarshalling the resource for %q as raw fields: %v", testCase.Description, err)
+				} else if err := json.Unmarshal(output, &outputRawFields); err != nil {
+					t.Errorf("Failure unmarshalling the result for %q as raw fields: %v", testCase.Description, err)
+				} else if rawFieldsDiff := cmp.Diff(outputRawFields, sourceRawFields, cmpopts.EquateEmpty(), cmpopts.SortMaps(func(a, b string) bool { return a < b })); len(rawFieldsDiff) > 0 {
+					t.Logf("Output raw: %v", string(output))
+					t.Errorf("Unexpected raw fields diff for the marshalled value for %q:\n\t %v", testCase.Description, rawFieldsDiff)
+				}
 			}
 		}
 	}

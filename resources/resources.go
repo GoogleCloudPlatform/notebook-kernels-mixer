@@ -58,19 +58,17 @@ func (ks *KernelSpecs) UnmarshalJSON(b []byte) error {
 	if !ok {
 		return fmt.Errorf("invalid value for the field 'kernelspecs': %+v: %w", specs, util.HTTPError(http.StatusBadRequest))
 	}
-	if len(ksMap) > 0 {
-		ks.KernelSpecs = make(map[string]*KernelSpec)
-		for name, specObj := range ksMap {
-			specBytes, err := json.Marshal(specObj)
-			if err != nil {
-				return fmt.Errorf("failure unmarshalling a nested `spec` field: %w", err)
-			}
-			var spec KernelSpec
-			if err := json.Unmarshal(specBytes, &spec); err != nil {
-				return fmt.Errorf("failure unmarshalling a nested `spec` field: %w", err)
-			}
-			ks.KernelSpecs[name] = &spec
+	ks.KernelSpecs = make(map[string]*KernelSpec)
+	for name, specObj := range ksMap {
+		specBytes, err := json.Marshal(specObj)
+		if err != nil {
+			return fmt.Errorf("failure unmarshalling a nested `spec` field: %w", err)
 		}
+		var spec KernelSpec
+		if err := json.Unmarshal(specBytes, &spec); err != nil {
+			return fmt.Errorf("failure unmarshalling a nested `spec` field: %w", err)
+		}
+		ks.KernelSpecs[name] = &spec
 	}
 	ks.rawFields = rawFields
 	return nil
@@ -85,20 +83,18 @@ func (ks KernelSpecs) MarshalJSON() ([]byte, error) {
 	if len(ks.Default) > 0 {
 		rawFields["default"] = ks.Default
 	}
-	if len(ks.KernelSpecs) > 0 {
-		specMap := make(map[string]any)
-		for name, spec := range ks.KernelSpecs {
-			specBytes, err := json.Marshal(spec)
-			if err != nil {
-				return nil, fmt.Errorf("failure unmarshalling a nested `spec` field: %w", err)
-			}
-			spec := make(map[string]any)
-			if err := json.Unmarshal(specBytes, &spec); err != nil {
-				return nil, fmt.Errorf("failure unmarshalling a nested `spec` field: %w", err)
-			}
-			specMap[name] = spec
+	specMap := make(map[string]any)
+	rawFields["kernelspecs"] = specMap
+	for name, spec := range ks.KernelSpecs {
+		specBytes, err := json.Marshal(spec)
+		if err != nil {
+			return nil, fmt.Errorf("failure unmarshalling a nested `spec` field: %w", err)
 		}
-		rawFields["kernelspecs"] = specMap
+		spec := make(map[string]any)
+		if err := json.Unmarshal(specBytes, &spec); err != nil {
+			return nil, fmt.Errorf("failure unmarshalling a nested `spec` field: %w", err)
+		}
+		specMap[name] = spec
 	}
 	return json.Marshal(rawFields)
 }
