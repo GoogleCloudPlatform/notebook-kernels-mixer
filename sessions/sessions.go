@@ -41,9 +41,12 @@ func fillInMissingFields(saved, partial *resources.Session) {
 		partial.ID = saved.ID
 	}
 	if partial.Notebook == nil {
-		partial.Notebook = saved.Notebook
+		partial.Notebook = make(map[string]string)
+		for k, v := range saved.Notebook {
+			partial.Notebook[k] = v
+		}
 	}
-	if partial.Notebook != nil {
+	if partial.Notebook != nil && len(saved.Notebook) > 0 {
 		if len(partial.Path) > 0 {
 			partial.Notebook["path"] = partial.Path
 		}
