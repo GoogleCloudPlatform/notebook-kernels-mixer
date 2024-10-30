@@ -266,6 +266,9 @@ type KernelMessageHeader struct {
 //
 // The parent_header for "execute_reply" messages will be the contents of the "header" dictionary
 // from the corresponding "execute_request" message.
+//
+// This mock only implements the legacy kernel protocol (as opposed to the V1 protocol), so it
+// explicitly forces the use of the legacy protocol via the websocket upgrader subprotocols field.
 func (m *mockJupyter) connectToKernel(w http.ResponseWriter, r *http.Request, kernelID string) {
 	log.Printf("Handling a websocket upgrade request: %+v", r)
 	m.mu.Lock()
@@ -297,6 +300,7 @@ func (m *mockJupyter) connectToKernel(w http.ResponseWriter, r *http.Request, ke
 		conn.WriteControl(websocket.CloseMessage, []byte{}, time.Now())
 		conn.Close()
 	}()
+	log.Printf("Negotiated websocket subprotocol: %q", conn.Subprotocol())
 	clientMsgs := make(chan *KernelMessage, 1)
 	go func() {
 		defer func() {
@@ -745,6 +749,12 @@ func ExerciseKernelWebsockets(serverURL, jupyterBasePath, kernelID string, reque
 		return err
 	}
 	defer conn.Close()
+	if conn.Subprotocol() != "" {
+		// Neither this client code nor the mock Jupyter server implement the V1 kernel protocol, so if
+		// the test method requested (and somehow got accepted) anything but the default (empty)
+		// subprotocol then report that as an error.
+		return fmt.Errorf("Unsupported websocket protocol %q", conn.Subprotocol())
+	}
 	kernelMsgHeader := &KernelMessageHeader{
 		Date:     time.Now().Format(time.RFC3339),
 		MsgID:    uuid.NewString(),
