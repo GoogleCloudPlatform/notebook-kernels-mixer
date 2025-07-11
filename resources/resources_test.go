@@ -17,6 +17,8 @@ package resources
 
 import (
 	"encoding/json"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -321,5 +323,85 @@ func TestUnmarshalAndMarshalRoundtrip(t *testing.T) {
 				}
 			}
 		}
+	}
+}
+
+func TestKernelSpecsOrdering(t *testing.T) {
+	testCaseDescription := "KernelSpecs sorted by endpointParentResource then display_name"
+	source := `{
+				"default": "default",
+				"kernelspecs": {
+					"spec1": {
+						"name":      "spec1",
+						"resources": {
+							"endpointParentResource": "//dataproc.googleapis.com/projects/project-id/regions/test-region/clusters/test-cluster"
+						},
+						"spec": 		 { "display_name": "b", "language": "python" }
+					},
+					"spec2": {
+						"name":      "spec2",
+						"resources": {
+							"endpointParentResource": "//dataproc.googleapis.com/projects/project-id/locations/test-location/sessions/test-session"
+						},
+						"spec": 		 { "display_name": "b", "language": "python" }
+					},
+					"spec3": {
+						"name":      "spec3",
+						"resources": {
+							"endpointParentResource": "//dataproc.googleapis.com/projects/project-id/locations/test-location/sessions/test-session"
+						},
+						"spec": 		 { "display_name": "a", "language": "python" }
+					}
+				}
+			}`
+	var got KernelSpecs
+	want := &KernelSpecs{
+		Default: "default",
+		KernelSpecs: map[string]*KernelSpec{
+			"spec1": &KernelSpec{
+				ID: "spec1",
+				Spec: &Spec{
+					DisplayName: "b",
+					Language:    "python",
+				},
+				Resources: map[string]string{
+					"endpointParentResource": "//dataproc.googleapis.com/projects/project-id/regions/test-region/clusters/test-cluster",
+				},
+			},
+			"spec2": &KernelSpec{
+				ID: "spec2",
+				Spec: &Spec{
+					DisplayName: "b",
+					Language:    "python",
+				},
+				Resources: map[string]string{
+					"endpointParentResource": "//dataproc.googleapis.com/projects/project-id/locations/test-location/sessions/test-session",
+				},
+			},
+			"spec3": &KernelSpec{
+				ID: "spec3",
+				Spec: &Spec{
+					DisplayName: "a",
+					Language:    "python",
+				},
+				Resources: map[string]string{
+					"endpointParentResource": "//dataproc.googleapis.com/projects/project-id/locations/test-location/sessions/test-session",
+				},
+			},
+		},
+	}
+
+	if err := json.Unmarshal([]byte(source), &got); err != nil {
+		t.Errorf("Failure unmarshalling the resource for %q: %v", testCaseDescription, err)
+	} else if diff := cmp.Diff(&got, want, cmpopts.EquateEmpty(), cmpopts.IgnoreUnexported(KernelSpecs{}, KernelSpec{}, Spec{})); len(diff) > 0 {
+		t.Errorf("Unexpected diff when unmarshalling the source for %q:\n\t %v", testCaseDescription, diff)
+	} else if output, err := json.Marshal(got); err != nil {
+		t.Errorf("Failure marshalling the unmarshalled resource for %q: %v", testCaseDescription, err)
+	} else if !slices.IsSorted([]int{
+		strings.Index(string(output), "spec3"),
+		strings.Index(string(output), "spec2"),
+		strings.Index(string(output), "spec1"),
+	}) {
+		t.Errorf("Output is not sorted correctly for %q", testCaseDescription)
 	}
 }

@@ -18,17 +18,20 @@ limitations under the License.
 package resources
 
 import (
+	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"slices"
 
 	"github.com/GoogleCloudPlatform/notebook-kernels-mixer/util"
 )
 
 // KernelSpecs represents the collection of kernel specs returned by a kernel spec list call.
 type KernelSpecs struct {
-	Default     string                 `json:"default"`
-	KernelSpecs map[string]*KernelSpec `json:"kernelspecs"`
+	Default     string  `json:"default"`
+	KernelSpecs SpecMap `json:"kernelspecs"`
 	rawFields   map[string]any
 }
 
@@ -83,20 +86,59 @@ func (ks KernelSpecs) MarshalJSON() ([]byte, error) {
 	if len(ks.Default) > 0 {
 		rawFields["default"] = ks.Default
 	}
-	specMap := make(map[string]any)
-	rawFields["kernelspecs"] = specMap
-	for name, spec := range ks.KernelSpecs {
+	rawFields["kernelspecs"] = ks.KernelSpecs
+	return json.Marshal(rawFields)
+}
+
+// SpecMap represents a map of kernel specs by name
+type SpecMap map[string]*KernelSpec
+
+// KeyValue represents a key-value pair
+type KeyValue[T any] struct {
+	Key   string
+	Value T
+}
+
+// MarshalJSON implements the json.Marshaler interface
+func (sm SpecMap) MarshalJSON() ([]byte, error) {
+	var buf bytes.Buffer
+	var specs []KeyValue[KernelSpec]
+	for k, v := range sm {
+		specs = append(specs, KeyValue[KernelSpec]{k, *v})
+	}
+
+	buf.Write([]byte{'{'})
+	// Sort the specs in a specific order in the JSON response
+	for idx, kv := range slices.SortedStableFunc(slices.Values(specs), compareSpec) {
+		spec := kv.Value
 		specBytes, err := json.Marshal(spec)
 		if err != nil {
 			return nil, fmt.Errorf("failure unmarshalling a nested `spec` field: %w", err)
 		}
-		spec := make(map[string]any)
-		if err := json.Unmarshal(specBytes, &spec); err != nil {
-			return nil, fmt.Errorf("failure unmarshalling a nested `spec` field: %w", err)
+		buf.WriteByte('"')
+		buf.WriteString(kv.Key)
+		buf.Write([]byte{'"', ':'})
+		// we know that specBytes is a string for a valid JSON object, e.g., {}
+		buf.Write(specBytes)
+		if idx < len(specs)-1 {
+			buf.WriteByte(',')
 		}
-		specMap[name] = spec
 	}
-	return json.Marshal(rawFields)
+	buf.WriteString("}")
+	return buf.Bytes(), nil
+}
+
+func compareSpec(a, b KeyValue[KernelSpec]) int {
+	endpointParentResourcePropertyKey := "endpointParentResource"
+
+	// sort by endpointParentResource first, then by display_name
+	return cmp.Or(
+		cmp.Compare(
+			a.Value.Resources[endpointParentResourcePropertyKey],
+			b.Value.Resources[endpointParentResourcePropertyKey],
+		),
+		cmp.Compare(a.Value.Spec.DisplayName, b.Value.Spec.DisplayName),
+	)
 }
 
 // Spec defines the `spec` field nested within a KernelSpec
