@@ -338,6 +338,13 @@ func (m *mockJupyter) connectToKernel(w http.ResponseWriter, r *http.Request, ke
 				// The channel has been closed
 				return
 			}
+			if msg.Content != nil {
+				code, ok := msg.Content["code"]
+				if ok && code == "!while true; do true; done" {
+					// Never respond in order to emulate the code running forever.
+					return
+				}
+			}
 			executionCount++
 			resp := &KernelMessage{
 				Header: &KernelMessageHeader{
@@ -792,6 +799,56 @@ func ExerciseKernelWebsockets(serverURL, jupyterBasePath, kernelID string, reque
 	}
 	if got, want := resp.Content["status"], "ok"; got != want {
 		return fmt.Errorf("unexpected message status: got %q, want %q", got, want)
+	}
+	return nil
+}
+
+// ExecuteHangingKernelExecution sends one kernel execution request to the given URL that should hang.
+func ExecuteHangingKernelExecution(serverURL, jupyterBasePath, kernelID string, requestHeader http.Header) error {
+	wsURL, err := url.Parse(serverURL)
+	if err != nil {
+		return fmt.Errorf("failure parsing the server URL: %v", err)
+	}
+	wsURL.Scheme = "ws"
+	wsURL.Path = path.Join(wsURL.Path, jupyterBasePath, "/api/kernels/", kernelID, "/channels")
+	q := wsURL.Query()
+	q.Set("session_id", kernelID)
+	wsURL.RawQuery = q.Encode()
+	log.Printf("Creating a websocket connection to %q", wsURL.String())
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL.String(), requestHeader)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if conn.Subprotocol() != "" {
+		// Neither this client code nor the mock Jupyter server implement the V1 kernel protocol, so if
+		// the test method requested (and somehow got accepted) anything but the default (empty)
+		// subprotocol then report that as an error.
+		return fmt.Errorf("Unsupported websocket protocol %q", conn.Subprotocol())
+	}
+	kernelMsgHeader := &KernelMessageHeader{
+		Date:     time.Now().Format(time.RFC3339),
+		MsgID:    uuid.NewString(),
+		MsgType:  "execute_request",
+		Session:  kernelID,
+		Username: "user",
+		Version:  "5.4",
+	}
+	kernelMsg := &KernelMessage{
+		Header:  kernelMsgHeader,
+		Channel: "shell",
+		MsgID:   kernelMsgHeader.MsgID,
+		MsgType: kernelMsgHeader.MsgType,
+		Content: map[string]any{
+			"code": "!while true; do true; done",
+		},
+	}
+	msgBytes, err := json.Marshal(kernelMsg)
+	if err != nil {
+		return err
+	}
+	if err := conn.WriteMessage(websocket.TextMessage, msgBytes); err != nil {
+		return err
 	}
 	return nil
 }
