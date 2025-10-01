@@ -228,7 +228,7 @@ type KernelMessage struct {
 
 	// ParentHeader is set for reply messages, and is the header value of
 	// the message being replied to.
-	ParentHeadder *KernelMessageHeader `json:"parent_header"`
+	ParentHeader *KernelMessageHeader `json:"parent_header"`
 }
 
 // KernelMessageHeader defines the encoding of the header field for kernel messages.
@@ -302,6 +302,28 @@ func (m *mockJupyter) connectToKernel(w http.ResponseWriter, r *http.Request, ke
 	}()
 	log.Printf("Negotiated websocket subprotocol: %q", conn.Subprotocol())
 	clientMsgs := make(chan *KernelMessage, 1)
+	initialMsgID := uuid.NewString()
+	initialMsg := &KernelMessage{
+		MsgID: initialMsgID,
+		Header: &KernelMessageHeader{
+			MsgID:    initialMsgID,
+			Session:  kernelID,
+			Username: "username",
+			Date:     time.Now().Format(time.RFC3339),
+			MsgType:  "status",
+			Version:  "5.3",
+		},
+		MsgType: "status",
+		Channel: "iopub",
+		Content: map[string]any{
+			"execution_state": "idle",
+		},
+	}
+	initialMsgBytes, err := json.Marshal(initialMsg)
+	if err != nil {
+		return
+	}
+	conn.WriteMessage(websocket.TextMessage, initialMsgBytes)
 	go func() {
 		defer func() {
 			close(clientMsgs)
@@ -361,7 +383,7 @@ func (m *mockJupyter) connectToKernel(w http.ResponseWriter, r *http.Request, ke
 					"payload":         []any{},
 					"status":          "ok",
 				},
-				ParentHeadder: msg.Header,
+				ParentHeader: msg.Header,
 			}
 			respBytes, err := json.Marshal(resp)
 			if err != nil {
@@ -786,15 +808,17 @@ func ExerciseKernelWebsockets(serverURL, jupyterBasePath, kernelID string, reque
 	if err := conn.WriteMessage(websocket.TextMessage, msgBytes); err != nil {
 		return err
 	}
-	_, respBytes, err := conn.ReadMessage()
-	if err != nil {
-		return err
-	}
 	var resp KernelMessage
-	if err := json.Unmarshal(respBytes, &resp); err != nil {
-		return err
+	for attempt := 0; attempt < 3 && (resp.ParentHeader == nil || resp.ParentHeader.MsgID != kernelMsgHeader.MsgID); attempt++ {
+		_, respBytes, err := conn.ReadMessage()
+		if err != nil {
+			return err
+		}
+		if err := json.Unmarshal(respBytes, &resp); err != nil {
+			return err
+		}
 	}
-	if got, want := resp.ParentHeadder.MsgID, kernelMsgHeader.MsgID; got != want {
+	if got, want := resp.ParentHeader.MsgID, kernelMsgHeader.MsgID; got != want {
 		return fmt.Errorf("unexpected message parent ID: got %q, want %q", got, want)
 	}
 	if got, want := resp.Content["status"], "ok"; got != want {
