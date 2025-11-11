@@ -61,7 +61,7 @@ func TestRoundtrip(t *testing.T) {
 	} else if got, want := len(kc1), 1; got != want {
 		t.Errorf("Unexpected number of kernels: got %d, want %d", got, want)
 	}
-	if err := ExerciseKernelWebsockets(server.URL, "", k2.ID, http.Header{}); err != nil {
+	if _, err := ExerciseKernelWebsockets(server.URL, "", k2.ID, http.Header{}); err != nil {
 		t.Errorf("Failure exercising the kernel: %v", err)
 	}
 

@@ -100,7 +100,7 @@ var DefaultKernelSpecs *resources.KernelSpecs = &resources.KernelSpecs{
 }
 
 // DefaultMockJupyter is an HTTP handler that implements a mock Jupyter server with one kernelspec.
-var DefaultMockJupyter http.Handler = NewMockJupyter("", false, 0, 0, DefaultKernelSpecs)
+var DefaultMockJupyter http.Handler = NewMockJupyter("", false, 10*time.Millisecond, 0, DefaultKernelSpecs)
 
 // relativePath returns the request's sub-path relative to the mock Jupyter server's base path.
 //
@@ -157,7 +157,7 @@ func (m *mockJupyter) insertKernel(k *resources.Kernel) (*resources.Kernel, erro
 	inserted := *k
 	inserted.ID = uuid.New().String()
 	inserted.ExecutionState = "starting"
-	inserted.LastActivity = time.Now().Format(time.RFC3339)
+	inserted.LastActivity = time.Now().Format(time.RFC3339Nano)
 	m.kernels[inserted.ID] = &inserted
 	return &inserted, nil
 }
@@ -253,6 +253,11 @@ type KernelMessageHeader struct {
 	Version string `json:"version"`
 }
 
+// Time returns the date of the message header as a `time.Time` value.
+func (h *KernelMessageHeader) Time() (time.Time, error) {
+	return time.Parse(time.RFC3339Nano, h.Date)
+}
+
 // connectToKernel implements the kernel message channel.
 //
 // For the purposes of testing, we only use `execute_request` and `execute_reply` messages.
@@ -309,7 +314,7 @@ func (m *mockJupyter) connectToKernel(w http.ResponseWriter, r *http.Request, ke
 			MsgID:    initialMsgID,
 			Session:  kernelID,
 			Username: "username",
-			Date:     time.Now().Format(time.RFC3339),
+			Date:     time.Now().Format(time.RFC3339Nano),
 			MsgType:  "status",
 			Version:  "5.3",
 		},
@@ -370,7 +375,7 @@ func (m *mockJupyter) connectToKernel(w http.ResponseWriter, r *http.Request, ke
 			executionCount++
 			resp := &KernelMessage{
 				Header: &KernelMessageHeader{
-					Date:     time.Now().Format(time.RFC3339),
+					Date:     time.Now().Format(time.RFC3339Nano),
 					MsgID:    uuid.NewString(),
 					MsgType:  "execute_reply",
 					Session:  msg.Header.Session,
@@ -762,10 +767,10 @@ func Delete(server *httptest.Server, path string) error {
 }
 
 // ExerciseKernelWebsockets sends one end-to-end kernel message to the given URL.
-func ExerciseKernelWebsockets(serverURL, jupyterBasePath, kernelID string, requestHeader http.Header) error {
+func ExerciseKernelWebsockets(serverURL, jupyterBasePath, kernelID string, requestHeader http.Header) (*KernelMessage, error) {
 	wsURL, err := url.Parse(serverURL)
 	if err != nil {
-		return fmt.Errorf("failure parsing the server URL: %v", err)
+		return nil, fmt.Errorf("failure parsing the server URL: %v", err)
 	}
 	wsURL.Scheme = "ws"
 	wsURL.Path = path.Join(wsURL.Path, jupyterBasePath, "/api/kernels/", kernelID, "/channels")
@@ -775,17 +780,17 @@ func ExerciseKernelWebsockets(serverURL, jupyterBasePath, kernelID string, reque
 	log.Printf("Creating a websocket connection to %q", wsURL.String())
 	conn, _, err := websocket.DefaultDialer.Dial(wsURL.String(), requestHeader)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer conn.Close()
 	if conn.Subprotocol() != "" {
 		// Neither this client code nor the mock Jupyter server implement the V1 kernel protocol, so if
 		// the test method requested (and somehow got accepted) anything but the default (empty)
 		// subprotocol then report that as an error.
-		return fmt.Errorf("Unsupported websocket protocol %q", conn.Subprotocol())
+		return nil, fmt.Errorf("Unsupported websocket protocol %q", conn.Subprotocol())
 	}
 	kernelMsgHeader := &KernelMessageHeader{
-		Date:     time.Now().Format(time.RFC3339),
+		Date:     time.Now().Format(time.RFC3339Nano),
 		MsgID:    uuid.NewString(),
 		MsgType:  "execute_request",
 		Session:  kernelID,
@@ -803,28 +808,28 @@ func ExerciseKernelWebsockets(serverURL, jupyterBasePath, kernelID string, reque
 	}
 	msgBytes, err := json.Marshal(kernelMsg)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := conn.WriteMessage(websocket.TextMessage, msgBytes); err != nil {
-		return err
+		return nil, err
 	}
 	var resp KernelMessage
 	for attempt := 0; attempt < 3 && (resp.ParentHeader == nil || resp.ParentHeader.MsgID != kernelMsgHeader.MsgID); attempt++ {
 		_, respBytes, err := conn.ReadMessage()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if err := json.Unmarshal(respBytes, &resp); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	if got, want := resp.ParentHeader.MsgID, kernelMsgHeader.MsgID; got != want {
-		return fmt.Errorf("unexpected message parent ID: got %q, want %q", got, want)
+		return nil, fmt.Errorf("unexpected message parent ID: got %q, want %q", got, want)
 	}
 	if got, want := resp.Content["status"], "ok"; got != want {
-		return fmt.Errorf("unexpected message status: got %q, want %q", got, want)
+		return nil, fmt.Errorf("unexpected message status: got %q, want %q", got, want)
 	}
-	return nil
+	return &resp, nil
 }
 
 // ExecuteHangingKernelExecution sends one kernel execution request to the given URL that should hang.
@@ -851,7 +856,7 @@ func ExecuteHangingKernelExecution(serverURL, jupyterBasePath, kernelID string, 
 		return fmt.Errorf("Unsupported websocket protocol %q", conn.Subprotocol())
 	}
 	kernelMsgHeader := &KernelMessageHeader{
-		Date:     time.Now().Format(time.RFC3339),
+		Date:     time.Now().Format(time.RFC3339Nano),
 		MsgID:    uuid.NewString(),
 		MsgType:  "execute_request",
 		Session:  kernelID,
