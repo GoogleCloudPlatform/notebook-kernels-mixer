@@ -257,6 +257,7 @@ type Kernel struct {
 	// This `metadata` field is not part of the Jupyter API. It is added as an extension for reporting
 	// additional metadata.
 	Metadata  map[string]any `json:"metadata,omitempty"`
+	Message   string         `json:"message,omitempty"`
 	rawFields map[string]any
 }
 
@@ -324,6 +325,13 @@ func (k *Kernel) UnmarshalJSON(b []byte) error {
 		}
 		k.Metadata = metadataMap
 	}
+	if messageVal, ok := rawFields["message"]; ok {
+		messageString, ok := messageVal.(string)
+		if !ok {
+			return fmt.Errorf("invalid value for the field 'message': %+v: %w", messageVal, util.HTTPError(http.StatusBadRequest))
+		}
+		k.Message = messageString
+	}
 	k.rawFields = rawFields
 	return nil
 }
@@ -353,6 +361,9 @@ func (k Kernel) MarshalJSON() ([]byte, error) {
 	}
 	if len(k.Metadata) > 0 {
 		rawFields["metadata"] = k.Metadata
+	}
+	if len(k.Message) > 0 {
+		rawFields["message"] = k.Message
 	}
 	return json.Marshal(rawFields)
 }
