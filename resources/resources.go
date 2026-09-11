@@ -28,10 +28,18 @@ import (
 	"github.com/GoogleCloudPlatform/notebook-kernels-mixer/util"
 )
 
+// Warning defines a warning message returned by the kernels mixer backend.
+type Warning struct {
+	ID      string `json:"id"`
+	Message string `json:"message"`
+	Sticky  bool   `json:"sticky,omitempty"`
+}
+
 // KernelSpecs represents the collection of kernel specs returned by a kernel spec list call.
 type KernelSpecs struct {
-	Default     string  `json:"default"`
-	KernelSpecs SpecMap `json:"kernelspecs"`
+	Default     string     `json:"default"`
+	KernelSpecs SpecMap    `json:"kernelspecs"`
+	Warnings    []*Warning `json:"warnings,omitempty"`
 	rawFields   map[string]any
 }
 
@@ -51,6 +59,17 @@ func (ks *KernelSpecs) UnmarshalJSON(b []byte) error {
 			return fmt.Errorf("invalid value for the field 'default': %+v: %w", defaultVal, util.HTTPError(http.StatusBadRequest))
 		}
 		ks.Default = defaultString
+	}
+	if warningsVal, ok := rawFields["warnings"]; ok {
+		warningsBytes, err := json.Marshal(warningsVal)
+		if err != nil {
+			return fmt.Errorf("failure marshalling the nested `warnings` field: %w", err)
+		}
+		var warnings []*Warning
+		if err := json.Unmarshal(warningsBytes, &warnings); err != nil {
+			return fmt.Errorf("failure unmarshalling the nested `warnings` field: %w", err)
+		}
+		ks.Warnings = warnings
 	}
 	specs, ok := rawFields["kernelspecs"]
 	if !ok {
@@ -87,6 +106,11 @@ func (ks KernelSpecs) MarshalJSON() ([]byte, error) {
 		rawFields["default"] = ks.Default
 	}
 	rawFields["kernelspecs"] = ks.KernelSpecs
+	if len(ks.Warnings) > 0 {
+		rawFields["warnings"] = ks.Warnings
+	} else {
+		delete(rawFields, "warnings")
+	}
 	return json.Marshal(rawFields)
 }
 

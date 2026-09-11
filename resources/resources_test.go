@@ -66,6 +66,26 @@ func TestUnmarshalAndMarshalRoundtrip(t *testing.T) {
 			},
 		},
 		{
+			Description: "KernelSpecs with warnings",
+			Source:      "{\"default\": \"default\", \"kernelspecs\": {\"default\": {\"name\": \"default\"}}, \"warnings\": [{\"id\": \"w1\", \"message\": \"msg1\", \"sticky\": true}]}",
+			Got:         &KernelSpecs{},
+			Want: &KernelSpecs{
+				Default: "default",
+				KernelSpecs: map[string]*KernelSpec{
+					"default": &KernelSpec{
+						ID: "default",
+					},
+				},
+				Warnings: []*Warning{
+					{
+						ID:      "w1",
+						Message: "msg1",
+						Sticky:  true,
+					},
+				},
+			},
+		},
+		{
 			Description: "Simple KernelSpecs with raw fields",
 			Source:      "{\"default\": \"default\", \"kernelspecs\": {\"default\": {\"name\": \"default\"}}, \"foo\": \"bar\", \"baz\": \"bat\"}",
 			Got:         &KernelSpecs{},
